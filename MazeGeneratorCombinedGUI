@@ -1,0 +1,195 @@
+import javax.swing.*;
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Scanner;
+
+public class MazeGeneratorCombinedGUI extends JPanel {
+
+    private static final int WALL = 1;
+    private static final int PATH = 0;
+
+    private int[][] maze;
+    private int width, height;
+    private int cellSize = 50;
+    private int startX, startY;
+    private int finishX, finishY;
+
+    public MazeGeneratorCombinedGUI() {
+        Scanner scan = new Scanner(System.in);
+        System.out.println("Do you want to generate a maze from an image? (yes/no)");
+        String choice = scan.nextLine().toLowerCase();
+
+        if (choice.equals("yes")) {
+            System.out.println("Enter the path to the image file:");
+            String imagePath = scan.nextLine();
+            loadShapeFromImage(imagePath);  // Load the shape and process it
+        } else {
+            System.out.println("How tall do you want your maze to be?");
+            height = Integer.parseInt(scan.nextLine());
+            System.out.println("How wide do you want your maze to be?");
+            width = Integer.parseInt(scan.nextLine());
+            maze = new int[height][width];
+            initializeMaze();
+        }
+
+        scaleMazeToFit();  // Scale maze to fit panel
+
+        startX = 1;  // Top middle of the shape
+        startY = width / 2;
+        finishX = height - 2;  // Bottom middle of the shape
+        finishY = width / 2;
+
+        new Thread(this::generateAndDisplayMaze).start(); // Start maze generation on a separate thread
+    }
+
+    private void loadShapeFromImage(String imagePath) {
+        try {
+            BufferedImage shapeImage = ImageIO.read(new File(imagePath));
+            int originalWidth = shapeImage.getWidth();
+            int originalHeight = shapeImage.getHeight();
+
+            // Find the bounding box for the black pixels
+            int minX = originalWidth, minY = originalHeight;
+            int maxX = 0, maxY = 0;
+
+            for (int i = 0; i < originalHeight; i++) {
+                for (int j = 0; j < originalWidth; j++) {
+                    int color = shapeImage.getRGB(j, i);
+                    if (color == Color.BLACK.getRGB()) {
+                        minX = Math.min(minX, j);
+                        minY = Math.min(minY, i);
+                        maxX = Math.max(maxX, j);
+                        maxY = Math.max(maxY, i);
+                    }
+                }
+            }
+
+            // Crop the image to the bounding box
+            BufferedImage croppedImage = shapeImage.getSubimage(minX, minY, maxX - minX + 1, maxY - minY + 1);
+
+            // Set the new width and height based on the cropped image
+            this.width = croppedImage.getWidth();
+            this.height = croppedImage.getHeight();
+            this.maze = new int[height][width];
+
+            // Process the cropped image to mark walls and paths
+            for (int i = 0; i < height; i++) {
+                for (int j = 0; j < width; j++) {
+                    int color = croppedImage.getRGB(j, i);
+                    int red = (color >> 16) & 0xFF;
+                    int green = (color >> 8) & 0xFF;
+                    int blue = color & 0xFF;
+
+                    int threshold = 50; // Set threshold to detect black
+                    if (red < threshold && green < threshold && blue < threshold) {
+                        maze[i][j] = WALL;  // Black pixels are initially walls
+                    } else {
+                        maze[i][j] = PATH;  // Non-black pixels are outside the maze
+                    }
+                }
+            }
+
+            // Set the start and finish points
+            maze[startX][startY] = PATH;
+            maze[finishX][finishY] = PATH;
+
+        } catch (IOException e) {
+            e.printStackTrace();
+            System.out.println("Failed to load shape from image. Ensure the file path and format are correct.");
+        }
+    }
+
+    private void scaleMazeToFit() {
+        this.cellSize = Math.min(800 / width, 800 / height);
+    }
+
+    private void initializeMaze() {
+        for (int i = 0; i < height; i++) {
+            for (int j = 0; j < width; j++) {
+                maze[i][j] = WALL; // Initialize the maze with walls
+            }
+        }
+    }
+
+    private void generateMaze(int x, int y) {
+        // Shuffle the directions to ensure a randomized maze
+        List<int[]> directions = new ArrayList<>();
+        directions.add(new int[]{-2, 0}); // Up
+        directions.add(new int[]{2, 0});  // Down
+        directions.add(new int[]{0, -2}); // Left
+        directions.add(new int[]{0, 2});  // Right
+        Collections.shuffle(directions);
+
+        // Mark the current cell as a path
+        maze[x][y] = PATH;
+        repaint(); // Refresh the GUI to visualize the process
+
+        try {
+            Thread.sleep(1); // Slow down to visualize the maze generation
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        // Explore all directions
+        for (int[] direction : directions) {
+            int nx = x + direction[0]; // Next cell x-coordinate
+            int ny = y + direction[1]; // Next cell y-coordinate
+
+            // Check if the cell is within bounds and has not been carved
+            if (nx > 0 && ny > 0 && nx < height - 1 && ny < width - 1 && maze[nx][ny] == WALL) {
+                // Carve a path by clearing the wall between the current and next cell
+                maze[x + direction[0] / 2][y + direction[1] / 2] = PATH; // Break the wall
+                maze[nx][ny] = PATH; // Mark the next cell as part of the path
+                generateMaze(nx, ny); // Recursively generate the maze
+            }
+        }
+    }
+
+    // Paint the maze to the panel
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+
+        // Draw the maze
+        for (int i = 0; i < height; i++) {
+            for (int j = 0; j < width; j++) {
+                if (maze[i][j] == WALL) {
+                    g.setColor(Color.BLACK);  // Walls are black
+                } else {
+                    g.setColor(Color.WHITE);  // Paths are white
+                }
+                g.fillRect(j * cellSize, i * cellSize, cellSize, cellSize);
+            }
+        }
+
+        // Draw the start position (green)
+        g.setColor(Color.GREEN);
+        g.fillRect(startY * cellSize, startX * cellSize, cellSize, cellSize);
+
+        // Draw the finish position (red)
+        g.setColor(Color.RED);
+        g.fillRect(finishY * cellSize, finishX * cellSize, cellSize, cellSize);
+    }
+
+    // Start maze generation
+    private void generateAndDisplayMaze() {
+        generateMaze(startX, startY);
+    }
+
+    // Main method to initialize the GUI
+    public static void main(String[] args) {
+        JFrame frame = new JFrame("Maze Generator");
+        MazeGeneratorCombinedGUI mazePanel = new MazeGeneratorCombinedGUI();
+
+        frame.add(mazePanel);
+        frame.setSize(816, 839);  // Adjust for window borders
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setVisible(true);
+    }
+}
