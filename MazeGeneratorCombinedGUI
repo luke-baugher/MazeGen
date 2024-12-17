@@ -1,13 +1,15 @@
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.awt.image.BufferedImage;
 import javax.imageio.ImageIO;
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Scanner;
 
 public class MazeGeneratorCombinedGUI extends JPanel {
 
@@ -19,33 +21,136 @@ public class MazeGeneratorCombinedGUI extends JPanel {
     private int cellSize = 50;
     private int startX, startY;
     private int finishX, finishY;
+    private boolean isImageImported = false;
+
+    private JTextField imagePathField;
+    private JTextField heightField;
+    private JTextField widthField;
 
     public MazeGeneratorCombinedGUI() {
-        Scanner scan = new Scanner(System.in);
-        System.out.println("Do you want to generate a maze from an image? (yes/no)");
-        String choice = scan.nextLine().toLowerCase();
+        setLayout(new BorderLayout());
 
-        if (choice.equals("yes")) {
-            System.out.println("Enter the path to the image file:");
-            String imagePath = scan.nextLine();
-            loadShapeFromImage(imagePath);  // Load the shape and process it
+        JPanel inputPanel = new JPanel();
+        inputPanel.setLayout(new GridLayout(5, 2, 10, 10));
+
+        JLabel imagePathLabel = new JLabel("Image Path:");
+        imagePathField = new JTextField();
+        inputPanel.add(imagePathLabel);
+        inputPanel.add(imagePathField);
+
+        JLabel heightLabel = new JLabel("Maze Height:");
+        heightField = new JTextField();
+        inputPanel.add(heightLabel);
+        inputPanel.add(heightField);
+
+        JLabel widthLabel = new JLabel("Maze Width:");
+        widthField = new JTextField();
+        inputPanel.add(widthLabel);
+        inputPanel.add(widthField);
+
+        JButton generateButton = new JButton("Generate Maze");
+        JButton clearButton = new JButton("Clear");
+        JButton saveCSVButton = new JButton("Save as CSV");
+
+        inputPanel.add(generateButton);
+        inputPanel.add(clearButton);
+        inputPanel.add(saveCSVButton);
+
+        add(inputPanel, BorderLayout.NORTH);
+
+        generateButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                handleGenerateButton();
+            }
+        });
+
+        clearButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                clearFields();
+            }
+        });
+
+        saveCSVButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                handleSaveCSV();
+            }
+        });
+    }
+
+    private void handleSaveCSV() {
+        if (maze == null) {
+            JOptionPane.showMessageDialog(this, "No maze to save. Generate a maze first.", "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Save Maze as CSV");
+        int userSelection = fileChooser.showSaveDialog(this);
+
+        if (userSelection == JFileChooser.APPROVE_OPTION) {
+            File fileToSave = fileChooser.getSelectedFile();
+            String filePath = fileToSave.getAbsolutePath();
+            if (!filePath.endsWith(".csv")) {
+                filePath += ".csv"; // Ensure the file has a .csv extension
+            }
+            exportMazeToCSV(filePath);
+        }
+    }
+
+
+    private void handleGenerateButton() {
+        String imagePath = imagePathField.getText().trim();
+        String heightInput = heightField.getText().trim();
+        String widthInput = widthField.getText().trim();
+
+        if (!imagePath.isEmpty()) {
+            isImageImported = true;
+            loadShapeFromImage(imagePath);
         } else {
-            System.out.println("How tall do you want your maze to be?");
-            height = Integer.parseInt(scan.nextLine());
-            System.out.println("How wide do you want your maze to be?");
-            width = Integer.parseInt(scan.nextLine());
+            isImageImported = false;
+
+            if (heightInput.isEmpty() || widthInput.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "Please provide both height and width for the maze.", "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            int checkHeight = Integer.parseInt(heightInput);
+            height = (checkHeight % 2 == 1) ? checkHeight : checkHeight + 1;
+
+            int checkWidth = Integer.parseInt(widthInput);
+            width = (checkWidth % 2 == 1) ? checkWidth : checkWidth + 1;
+
             maze = new int[height][width];
             initializeMaze();
         }
 
-        scaleMazeToFit();  // Scale maze to fit panel
+        scaleMazeToFit();
 
-        startX = 1;  // Top middle of the shape
-        startY = width / 2;
-        finishX = height - 2;  // Bottom middle of the shape
-        finishY = width / 2;
+        if (isImageImported) {
+            startX = 1;
+            startY = width / 2;
+            finishX = height - 2;
+            finishY = width / 2;
+        } else {
+            startX = 1;
+            startY = 1;
+            finishX = height - 2;
+            finishY = width - 2;
+        }
 
-        new Thread(this::generateAndDisplayMaze).start(); // Start maze generation on a separate thread
+        new Thread(this::generateAndDisplayMaze).start();
+        repaint();
+    }
+
+    private void clearFields() {
+        imagePathField.setText("");
+        heightField.setText("");
+        widthField.setText("");
+        maze = null;
+        repaint();
     }
 
     private void loadShapeFromImage(String imagePath) {
@@ -54,7 +159,6 @@ public class MazeGeneratorCombinedGUI extends JPanel {
             int originalWidth = shapeImage.getWidth();
             int originalHeight = shapeImage.getHeight();
 
-            // Find the bounding box for the black pixels
             int minX = originalWidth, minY = originalHeight;
             int maxX = 0, maxY = 0;
 
@@ -70,15 +174,11 @@ public class MazeGeneratorCombinedGUI extends JPanel {
                 }
             }
 
-            // Crop the image to the bounding box
             BufferedImage croppedImage = shapeImage.getSubimage(minX, minY, maxX - minX + 1, maxY - minY + 1);
-
-            // Set the new width and height based on the cropped image
             this.width = croppedImage.getWidth();
             this.height = croppedImage.getHeight();
             this.maze = new int[height][width];
 
-            // Process the cropped image to mark walls and paths
             for (int i = 0; i < height; i++) {
                 for (int j = 0; j < width; j++) {
                     int color = croppedImage.getRGB(j, i);
@@ -86,110 +186,116 @@ public class MazeGeneratorCombinedGUI extends JPanel {
                     int green = (color >> 8) & 0xFF;
                     int blue = color & 0xFF;
 
-                    int threshold = 50; // Set threshold to detect black
+                    int threshold = 50;
                     if (red < threshold && green < threshold && blue < threshold) {
-                        maze[i][j] = WALL;  // Black pixels are initially walls
+                        maze[i][j] = WALL;
                     } else {
-                        maze[i][j] = PATH;  // Non-black pixels are outside the maze
+                        maze[i][j] = PATH;
                     }
                 }
             }
 
-            // Set the start and finish points
-            maze[startX][startY] = PATH;
-            maze[finishX][finishY] = PATH;
-
         } catch (IOException e) {
-            e.printStackTrace();
-            System.out.println("Failed to load shape from image. Ensure the file path and format are correct.");
+            JOptionPane.showMessageDialog(this, "Failed to load shape from image. Ensure the file path and format are correct.");
         }
     }
 
     private void scaleMazeToFit() {
-        this.cellSize = Math.min(800 / width, 800 / height);
+        if (width > 0 && height > 0) {
+            this.cellSize = Math.min(712 / width, 712 / height);
+        }
     }
 
     private void initializeMaze() {
         for (int i = 0; i < height; i++) {
             for (int j = 0; j < width; j++) {
-                maze[i][j] = WALL; // Initialize the maze with walls
+                maze[i][j] = WALL;
             }
         }
     }
 
     private void generateMaze(int x, int y) {
-        // Shuffle the directions to ensure a randomized maze
         List<int[]> directions = new ArrayList<>();
-        directions.add(new int[]{-2, 0}); // Up
-        directions.add(new int[]{2, 0});  // Down
-        directions.add(new int[]{0, -2}); // Left
-        directions.add(new int[]{0, 2});  // Right
+        directions.add(new int[]{-2, 0});
+        directions.add(new int[]{2, 0});
+        directions.add(new int[]{0, -2});
+        directions.add(new int[]{0, 2});
         Collections.shuffle(directions);
 
-        // Mark the current cell as a path
         maze[x][y] = PATH;
-        repaint(); // Refresh the GUI to visualize the process
+        repaint();
 
         try {
-            Thread.sleep(1); // Slow down to visualize the maze generation
+            Thread.sleep(1);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
 
-        // Explore all directions
         for (int[] direction : directions) {
-            int nx = x + direction[0]; // Next cell x-coordinate
-            int ny = y + direction[1]; // Next cell y-coordinate
+            int nx = x + direction[0];
+            int ny = y + direction[1];
 
-            // Check if the cell is within bounds and has not been carved
-            if (nx > 0 && ny > 0 && nx < height - 1 && ny < width - 1 && maze[nx][ny] == WALL) {
-                // Carve a path by clearing the wall between the current and next cell
-                maze[x + direction[0] / 2][y + direction[1] / 2] = PATH; // Break the wall
-                maze[nx][ny] = PATH; // Mark the next cell as part of the path
-                generateMaze(nx, ny); // Recursively generate the maze
+            if (nx >= 1 && ny >= 1 && nx <= height - 1 && ny <= width - 1 && maze[nx][ny] == WALL) {
+                maze[x + direction[0] / 2][y + direction[1] / 2] = PATH;
+                maze[nx][ny] = PATH;
+                generateMaze(nx, ny);
             }
         }
     }
 
-    // Paint the maze to the panel
+    private void exportMazeToCSV(String filePath) {
+        try (PrintWriter writer = new PrintWriter(new File(filePath))) {
+            for (int[] row : maze) {
+                StringBuilder sb = new StringBuilder();
+                for (int cell : row) {
+                    sb.append(cell).append(",");
+                }
+                writer.println(sb.deleteCharAt(sb.length() - 1));
+            }
+            JOptionPane.showMessageDialog(this, "Maze exported successfully to " + filePath);
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "Error exporting maze to CSV.");
+        }
+    }
+
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
-
-        // Draw the maze
-        for (int i = 0; i < height; i++) {
-            for (int j = 0; j < width; j++) {
-                if (maze[i][j] == WALL) {
-                    g.setColor(Color.BLACK);  // Walls are black
-                } else {
-                    g.setColor(Color.WHITE);  // Paths are white
+        int offSetForGUIy =getComponent(0).getHeight();
+        if (maze != null) {
+            for (int i = 0; i < height; i++) {
+                for (int j = 0; j < width; j++) {
+                    if (maze[i][j] == WALL) {
+                        g.setColor(Color.BLACK);
+                    } else {
+                        g.setColor(Color.WHITE);
+                    }
+                    g.fillRect(j * cellSize, offSetForGUIy + i *cellSize, cellSize, cellSize);
                 }
-                g.fillRect(j * cellSize, i * cellSize, cellSize, cellSize);
             }
+
+            // Draw start and finish points
+            g.setColor(Color.GREEN);
+            g.fillRect(startY * cellSize, offSetForGUIy +startX * cellSize, cellSize, cellSize);
+
+            g.setColor(Color.RED);
+            g.fillRect(finishY * cellSize,offSetForGUIy + finishX * cellSize, cellSize, cellSize);
         }
-
-        // Draw the start position (green)
-        g.setColor(Color.GREEN);
-        g.fillRect(startY * cellSize, startX * cellSize, cellSize, cellSize);
-
-        // Draw the finish position (red)
-        g.setColor(Color.RED);
-        g.fillRect(finishY * cellSize, finishX * cellSize, cellSize, cellSize);
     }
 
-    // Start maze generation
     private void generateAndDisplayMaze() {
         generateMaze(startX, startY);
+        maze[finishX][finishY] = PATH;
+        repaint();
     }
 
-    // Main method to initialize the GUI
     public static void main(String[] args) {
         JFrame frame = new JFrame("Maze Generator");
         MazeGeneratorCombinedGUI mazePanel = new MazeGeneratorCombinedGUI();
 
-        frame.add(mazePanel);
-        frame.setSize(816, 839);  // Adjust for window borders
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setSize(900, 900);
+        frame.add(mazePanel);
         frame.setVisible(true);
     }
 }
