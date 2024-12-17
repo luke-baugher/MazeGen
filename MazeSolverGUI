@@ -1,0 +1,526 @@
+import javax.swing.*;
+import java.awt.*;
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.*;
+import java.util.List;
+
+public class MazeSolverGUI extends JPanel {
+    private static final int WALL = 1;
+    private static final int PATH = 0;
+
+    private int[][] maze;
+    private int width, height;
+    private int cellSize;
+    private Point start, finish;
+    private Set<Point> exploredCells; // Track explored cells
+    private List<Point> solutionPath;
+
+    public MazeSolverGUI(String csvFilePath) {
+        loadMazeFromCSV(csvFilePath);
+        calculateCellSize();
+
+        JFrame frame = new JFrame("Maze Solver");
+        frame.add(this);
+        frame.setSize(width * cellSize + 50, height * cellSize + 70);
+        frame.setResizable(false);
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setVisible(true);
+
+        System.out.println("Starting maze-solving process...");
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                solveMazeWithVisualization();
+                return null;
+            }
+        }.execute();
+    }
+
+    private void loadMazeFromCSV(String csvFilePath) {
+        try (BufferedReader reader = Files.newBufferedReader(Paths.get(csvFilePath))) {
+            List<int[]> rows = new ArrayList<>();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] tokens = line.trim().split(",");
+                int[] row = Arrays.stream(tokens).mapToInt(Integer::parseInt).toArray();
+                rows.add(row);
+            }
+            height = rows.size();
+            width = rows.get(0).length;
+            maze = rows.toArray(new int[height][width]);
+
+            start = new Point(1, 1); // Define the starting point
+            finish = findFinishPoint(); // Locate the finish point
+            System.out.println("Finish point set to: " + finish);
+        } catch (IOException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Failed to load maze from CSV.");
+        }
+    }
+
+    private Point findFinishPoint() {
+        for (int i = height - 1; i >= 0; i--) {
+            for (int j = width - 1; j >= 0; j--) {
+                if (maze[i][j] == PATH) {
+                    return new Point(i, j);
+                }
+            }
+        }
+        return new Point(height - 2, width - 2); // Default finish point
+    }
+
+    private void calculateCellSize() {
+        Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+        int screenWidth = screenSize.width;
+        int screenHeight = screenSize.height;
+
+        int maxCellWidth = (screenWidth - 100) / width;
+        int maxCellHeight = (screenHeight - 150) / height;
+        cellSize = Math.max(1, Math.min(maxCellWidth, maxCellHeight));
+    }
+
+    private void solveMazeWithVisualization() {
+        PriorityQueue<Node> openSet = new PriorityQueue<>(Comparator.comparingDouble(node -> node.f));
+        Map<Point, Point> cameFrom = new HashMap<>();
+        Map<Point, Double> gScore = new HashMap<>();
+        Set<Point> closedSet = new HashSet<>();
+
+        gScore.put(start, 0.0);
+        openSet.add(new Node(start, heuristic(start, finish)));
+
+        exploredCells = new HashSet<>();
+        int steps = 0;
+
+        while (!openSet.isEmpty()) {
+            Node current = openSet.poll();
+
+            // Mark the current cell as explored
+            exploredCells.add(current.point);
+
+            // Repaint after each step (updates the display)
+            SwingUtilities.invokeLater(() -> repaint());
+            sleep(5); // Delay for visualization
+
+            steps++;
+
+            if (current.point.equals(finish)) {
+                solutionPath = reconstructPath(cameFrom, current.point);
+                System.out.println("Path found!");
+                SwingUtilities.invokeLater(() -> repaint());
+                sleep(1000); // Pause to show the final solution
+                return;
+            }
+
+            closedSet.add(current.point);
+
+            // Explore neighbors
+            for (Point neighbor : getNeighbors(current.point)) {
+                if (closedSet.contains(neighbor)) continue;
+
+                double tentativeGScore = gScore.getOrDefault(current.point, Double.MAX_VALUE) + 1;
+                if (tentativeGScore < gScore.getOrDefault(neighbor, Double.MAX_VALUE)) {
+                    cameFrom.put(neighbor, current.point);
+                    gScore.put(neighbor, tentativeGScore);
+                    openSet.add(new Node(neighbor, tentativeGScore + heuristic(neighbor, finish)));
+                }
+            }
+        }
+        System.out.println("No path found.");
+        SwingUtilities.invokeLater(this::repaint);
+    }
+
+    private List<Point> getNeighbors(Point point) {
+        List<Point> neighbors = new ArrayList<>();
+        int[][] directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+        for (int[] dir : directions) {
+            int nx = point.x + dir[0];
+            int ny = point.y + dir[1];
+            if (nx >= 0 && ny >= 0 && nx < height && ny < width && maze[nx][ny] == PATH) {
+                neighbors.add(new Point(nx, ny));
+            }
+        }
+        return neighbors;
+    }
+
+    private double heuristic(Point p1, Point p2) {
+        return Math.abs(Math.pow((p1.x - p2.x),2) + Math.pow((p1.y - p2.y),2));
+    }
+
+    private List<Point> reconstructPath(Map<Point, Point> cameFrom, Point current) {
+        List<Point> path = new ArrayList<>();
+        while (cameFrom.containsKey(current)) {
+            path.add(current);
+            current = cameFrom.get(current);
+        }
+        path.add(start);
+        Collections.reverse(path);
+        return path;
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+
+        // Paint the maze walls and paths
+        for (int i = 0; i < height; i++) {
+            for (int j = 0; j < width; j++) {
+                if (maze[i][j] == WALL) {
+                    g.setColor(Color.BLACK); // Walls in black
+                } else {
+                    g.setColor(Color.WHITE); // Paths in white
+                }
+                g.fillRect(j * cellSize, i * cellSize, cellSize, cellSize);
+            }
+        }
+
+        // Paint the explored cells in light yellow
+        g.setColor(new Color(147, 8, 19)); // Light yellow for explored cells
+        for (Point p : exploredCells) {
+            g.fillRect(p.y * cellSize, p.x * cellSize, cellSize, cellSize);
+        }
+
+        // Paint the solution path in blue
+        if (solutionPath != null) {
+            g.setColor(Color.BLUE);
+            for (Point p : solutionPath) {
+                g.fillRect(p.y * cellSize, p.x * cellSize, cellSize, cellSize);
+            }
+        }
+
+        // Paint the start and finish points
+        g.setColor(Color.GREEN);
+        g.fillRect(start.y * cellSize, start.x * cellSize, cellSize, cellSize);
+
+        g.setColor(Color.RED);
+        g.fillRect(finish.y * cellSize, finish.x * cellSize, cellSize, cellSize);
+    }
+
+    private void sleep(int ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static class Node {
+        Point point;
+        double f;
+
+        Node(Point point, double f) {
+            this.point = point;
+            this.f = f;
+        }
+    }
+
+    public static void main(String[] args) {
+        String csvFilePath = "/Users/mateotagtachian/Maze3fr.csv"; // Update the path here
+        new MazeSolverGUI(csvFilePath);
+    }
+}
+
+On Dec 17, 2024, at 9:59 AM, Mateo Tagtachian <mateotagtachian@westminster.net> wrote:
+
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
+import java.io.File;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+public class MazeGeneratorCombinedGUI extends JPanel {
+
+    private static final int WALL = 1;
+    private static final int PATH = 0;
+
+    private int[][] maze;
+    private int width, height;
+    private int cellSize = 50;
+    private int startX, startY;
+    private int finishX, finishY;
+    private boolean isImageImported = false;
+
+    private JTextField imagePathField;
+    private JTextField heightField;
+    private JTextField widthField;
+
+    public MazeGeneratorCombinedGUI() {
+        setLayout(new BorderLayout());
+
+        JPanel inputPanel = new JPanel();
+        inputPanel.setLayout(new GridLayout(5, 2, 10, 10));
+
+        JLabel imagePathLabel = new JLabel("Image Path:");
+        imagePathField = new JTextField();
+        inputPanel.add(imagePathLabel);
+        inputPanel.add(imagePathField);
+
+        JLabel heightLabel = new JLabel("Maze Height:");
+        heightField = new JTextField();
+        inputPanel.add(heightLabel);
+        inputPanel.add(heightField);
+
+        JLabel widthLabel = new JLabel("Maze Width:");
+        widthField = new JTextField();
+        inputPanel.add(widthLabel);
+        inputPanel.add(widthField);
+
+        JButton generateButton = new JButton("Generate Maze");
+        JButton clearButton = new JButton("Clear");
+        JButton saveCSVButton = new JButton("Save as CSV");
+
+        inputPanel.add(generateButton);
+        inputPanel.add(clearButton);
+        inputPanel.add(saveCSVButton);
+
+        add(inputPanel, BorderLayout.NORTH);
+
+        generateButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                handleGenerateButton();
+            }
+        });
+
+        clearButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                clearFields();
+            }
+        });
+
+        saveCSVButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                handleSaveCSV();
+            }
+        });
+    }
+
+    private void handleSaveCSV() {
+        if (maze == null) {
+            JOptionPane.showMessageDialog(this, "No maze to save. Generate a maze first.", "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Save Maze as CSV");
+        int userSelection = fileChooser.showSaveDialog(this);
+
+        if (userSelection == JFileChooser.APPROVE_OPTION) {
+            File fileToSave = fileChooser.getSelectedFile();
+            String filePath = fileToSave.getAbsolutePath();
+            if (!filePath.endsWith(".csv")) {
+                filePath += ".csv"; // Ensure the file has a .csv extension
+            }
+            exportMazeToCSV(filePath);
+        }
+    }
+
+
+    private void handleGenerateButton() {
+        String imagePath = imagePathField.getText().trim();
+        String heightInput = heightField.getText().trim();
+        String widthInput = widthField.getText().trim();
+
+        if (!imagePath.isEmpty()) {
+            isImageImported = true;
+            loadShapeFromImage(imagePath);
+        } else {
+            isImageImported = false;
+
+            if (heightInput.isEmpty() || widthInput.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "Please provide both height and width for the maze.", "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            int checkHeight = Integer.parseInt(heightInput);
+            height = (checkHeight % 2 == 1) ? checkHeight : checkHeight + 1;
+
+            int checkWidth = Integer.parseInt(widthInput);
+            width = (checkWidth % 2 == 1) ? checkWidth : checkWidth + 1;
+
+            maze = new int[height][width];
+            initializeMaze();
+        }
+
+        scaleMazeToFit();
+
+        if (isImageImported) {
+            startX = 1;
+            startY = width / 2;
+            finishX = height - 2;
+            finishY = width / 2;
+        } else {
+            startX = 1;
+            startY = 1;
+            finishX = height - 2;
+            finishY = width - 2;
+        }
+
+        new Thread(this::generateAndDisplayMaze).start();
+        repaint();
+    }
+
+    private void clearFields() {
+        imagePathField.setText("");
+        heightField.setText("");
+        widthField.setText("");
+        maze = null;
+        repaint();
+    }
+
+    private void loadShapeFromImage(String imagePath) {
+        try {
+            BufferedImage shapeImage = ImageIO.read(new File(imagePath));
+            int originalWidth = shapeImage.getWidth();
+            int originalHeight = shapeImage.getHeight();
+
+            int minX = originalWidth, minY = originalHeight;
+            int maxX = 0, maxY = 0;
+
+            for (int i = 0; i < originalHeight; i++) {
+                for (int j = 0; j < originalWidth; j++) {
+                    int color = shapeImage.getRGB(j, i);
+                    if (color == Color.BLACK.getRGB()) {
+                        minX = Math.min(minX, j);
+                        minY = Math.min(minY, i);
+                        maxX = Math.max(maxX, j);
+                        maxY = Math.max(maxY, i);
+                    }
+                }
+            }
+
+            BufferedImage croppedImage = shapeImage.getSubimage(minX, minY, maxX - minX + 1, maxY - minY + 1);
+            this.width = croppedImage.getWidth();
+            this.height = croppedImage.getHeight();
+            this.maze = new int[height][width];
+
+            for (int i = 0; i < height; i++) {
+                for (int j = 0; j < width; j++) {
+                    int color = croppedImage.getRGB(j, i);
+                    int red = (color >> 16) & 0xFF;
+                    int green = (color >> 8) & 0xFF;
+                    int blue = color & 0xFF;
+
+                    int threshold = 50;
+                    if (red < threshold && green < threshold && blue < threshold) {
+                        maze[i][j] = WALL;
+                    } else {
+                        maze[i][j] = PATH;
+                    }
+                }
+            }
+
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "Failed to load shape from image. Ensure the file path and format are correct.");
+        }
+    }
+
+    private void scaleMazeToFit() {
+        if (width > 0 && height > 0) {
+            this.cellSize = Math.min(712 / width, 712 / height);
+        }
+    }
+
+    private void initializeMaze() {
+        for (int i = 0; i < height; i++) {
+            for (int j = 0; j < width; j++) {
+                maze[i][j] = WALL;
+            }
+        }
+    }
+
+    private void generateMaze(int x, int y) {
+        List<int[]> directions = new ArrayList<>();
+        directions.add(new int[]{-2, 0});
+        directions.add(new int[]{2, 0});
+        directions.add(new int[]{0, -2});
+        directions.add(new int[]{0, 2});
+        Collections.shuffle(directions);
+
+        maze[x][y] = PATH;
+        repaint();
+
+        try {
+            Thread.sleep(1);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        for (int[] direction : directions) {
+            int nx = x + direction[0];
+            int ny = y + direction[1];
+
+            if (nx >= 1 && ny >= 1 && nx <= height - 1 && ny <= width - 1 && maze[nx][ny] == WALL) {
+                maze[x + direction[0] / 2][y + direction[1] / 2] = PATH;
+                maze[nx][ny] = PATH;
+                generateMaze(nx, ny);
+            }
+        }
+    }
+
+    private void exportMazeToCSV(String filePath) {
+        try (PrintWriter writer = new PrintWriter(new File(filePath))) {
+            for (int[] row : maze) {
+                StringBuilder sb = new StringBuilder();
+                for (int cell : row) {
+                    sb.append(cell).append(",");
+                }
+                writer.println(sb.deleteCharAt(sb.length() - 1));
+            }
+            JOptionPane.showMessageDialog(this, "Maze exported successfully to " + filePath);
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "Error exporting maze to CSV.");
+        }
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+        int offSetForGUIy =getComponent(0).getHeight();
+        if (maze != null) {
+            for (int i = 0; i < height; i++) {
+                for (int j = 0; j < width; j++) {
+                    if (maze[i][j] == WALL) {
+                        g.setColor(Color.BLACK);
+                    } else {
+                        g.setColor(Color.WHITE);
+                    }
+                    g.fillRect(j * cellSize, offSetForGUIy + i *cellSize, cellSize, cellSize);
+                }
+            }
+
+            // Draw start and finish points
+            g.setColor(Color.GREEN);
+            g.fillRect(startY * cellSize, offSetForGUIy +startX * cellSize, cellSize, cellSize);
+
+            g.setColor(Color.RED);
+            g.fillRect(finishY * cellSize,offSetForGUIy + finishX * cellSize, cellSize, cellSize);
+        }
+    }
+
+    private void generateAndDisplayMaze() {
+        generateMaze(startX, startY);
+        maze[finishX][finishY] = PATH;
+        repaint();
+    }
+
+    public static void main(String[] args) {
+        JFrame frame = new JFrame("Maze Generator");
+        MazeGeneratorCombinedGUI mazePanel = new MazeGeneratorCombinedGUI();
+
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setSize(900, 900);
+        frame.add(mazePanel);
+        frame.setVisible(true);
+    }
+}
